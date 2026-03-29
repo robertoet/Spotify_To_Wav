@@ -71,6 +71,7 @@ def run_cmd(cmd: list[str]) -> tuple[bool, str, str]:
 def search_youtube_first_result(query: str, cookies_from_browser: str | None = None) -> str | None:
     cmd = [
         "yt-dlp",
+        "--remote-components", "ejs:github",
         f"ytsearch3:{query}",
         "--print", "webpage_url",
         "--skip-download",
@@ -103,6 +104,7 @@ def download_audio(
 
     cmd = [
         "yt-dlp",
+        "--remote-components", "ejs:github",
         "-f", "bestaudio/best",
         "--extract-audio",
         "--audio-format", audio_format,
