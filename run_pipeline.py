@@ -3,20 +3,29 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
+from src import csv_clean_and_concat
 from src import list_dl_yt
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-def run_step(script: Path, *extra_args: str) -> None:
-    command = [sys.executable, str(script), *extra_args]
-    print(f"==> Starte: {' '.join(command)}")
-    subprocess.run(command, cwd=PROJECT_ROOT, check=True)
+def run_csv_step(input_dir: Path, output_csv: Path) -> int:
+    print(f"Roh-CSV-Ordner: {input_dir}")
+    print(f"Erzeuge: {output_csv}")
+
+    try:
+        rows = csv_clean_and_concat.collect_rows(input_dir)
+        csv_clean_and_concat.write_rows(rows, output_csv)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Fehler beim CSV-Schritt: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{len(rows)} Zeilen gespeichert in '{output_csv}'.")
+    return 0
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,10 +36,10 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
-        "--input-csv",
-        dest="input_csv",
-        default=None,
-        help="Pfad zur Eingabe-CSV für den Download-Schritt (Standard: song_namen.csv im Projekt-Root)",
+        "--input-dir",
+        dest="input_dir",
+        default="roh",
+        help="Pfad zum Ordner mit den Roh-CSV-Dateien (Standard: roh)",
     )
     parser.add_argument(
         "output_dir",
@@ -61,22 +70,22 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    input_csv = Path(args.input_csv).resolve() if args.input_csv else (PROJECT_ROOT / "song_namen.csv")
+    input_dir = Path(args.input_dir).resolve()
+    input_csv = PROJECT_ROOT / "song_namen.csv"
     output_dir = Path(args.output_dir).resolve()
 
-    try:
-        run_step(PROJECT_ROOT / "src" / "csv_clean_and_concat.py")
-        result = list_dl_yt.run_download_pipeline(
-            input_csv=input_csv,
-            output_dir=output_dir,
-            audio_format=args.audio_format,
-            save_links=args.save_links,
-            cookies_from_browser=args.cookies_from_browser,
-        )
-    except subprocess.CalledProcessError as err:
-        print(f"Pipeline fehlgeschlagen (Exit-Code {err.returncode}).", file=sys.stderr)
-        return err.returncode
+    result = run_csv_step(input_dir=input_dir, output_csv=input_csv)
+    if result != 0:
+        print(f"Pipeline fehlgeschlagen (Exit-Code {result}).", file=sys.stderr)
+        return result
 
+    result = list_dl_yt.run_download_pipeline(
+        input_csv=input_csv,
+        output_dir=output_dir,
+        audio_format=args.audio_format,
+        save_links=args.save_links,
+        cookies_from_browser=args.cookies_from_browser,
+    )
     if result != 0:
         print(f"Pipeline fehlgeschlagen (Exit-Code {result}).", file=sys.stderr)
         return result

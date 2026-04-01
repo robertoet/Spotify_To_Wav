@@ -42,7 +42,7 @@ Optional mit den bisherigen Download-Argumenten:
 
 ```bash
 python run_pipeline.py [output_dir] \
-  --input-csv /pfad/zur/song_namen.csv \
+  --input-dir /pfad/zu/roh_csvs \
   --audio-format wav \
   --save-links \
   --cookies-from-browser chrome
