@@ -8,6 +8,8 @@ csv_clean_and_concat.py führt diese zusammen und behält nur noch Author, Titel
 
 list_dl_yt.py sucht mit Hilfe der csv nach dem gewünschten Lied auf yt und lädt dieses mit yt-dlp herunter. Es wird so gennant wie in der csv Datei.
 
+Ist extra langsam gemacht, weil man sonst Probleme mit Botting bekommen könnte.
+
 ## Voraussetzungen
 
 - Python 3.10+
@@ -18,6 +20,7 @@ list_dl_yt.py sucht mit Hilfe der csv nach dem gewünschten Lied auf yt und läd
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -29,13 +32,21 @@ pip install -r requirements.txt
 python csv_clean_and_concat.py
 ```
 
-### Herunterladen
+### Komplette Pipeline
 
 ```bash
-python list_dl_yt.py
+python run_pipeline.py
 ```
 
-(Wer hätte es gedacht :))
+Optional mit den bisherigen Download-Argumenten:
+
+```bash
+python run_pipeline.py [output_dir] \
+  --input-csv /pfad/zur/song_namen.csv \
+  --audio-format wav \
+  --save-links \
+  --cookies-from-browser chrome
+```
 
 ## Haftungsausschluss (Disclaimer)
 
@@ -48,4 +59,3 @@ Es wird keine Gewähr dafür übernommen, dass das Projekt frei von Fehlern ist 
 Beiträge von Dritten spiegeln nicht zwingend die Meinung des Autors wider. Für externe Links oder Inhalte Dritter wird ebenfalls keine Haftung übernommen.
 
 Durch die Nutzung dieses Projekts erklärst du dich mit diesen Bedingungen einverstanden.
-

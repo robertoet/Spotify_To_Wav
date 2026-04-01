@@ -5,13 +5,11 @@ import shutil
 import re
 import time
 from pathlib import Path
-import argparse
 
 
 def ensure_ytdlp_exists() -> None:
     if shutil.which("yt-dlp") is None:
-        print("Fehler: yt-dlp wurde nicht gefunden. Installiere es zuerst.", file=sys.stderr)
-        sys.exit(1)
+        raise FileNotFoundError("yt-dlp wurde nicht gefunden. Installiere es zuerst.")
 
 
 def normalize_text(text: str) -> str:
@@ -222,82 +220,48 @@ def process_csv(
                 link_file_handle.close()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Liest song_namen.csv (oder eine angegebene CSV), sucht YouTube-Treffer "
-                    "und lädt die Audiospur mit Dateiname 'Artist - Song.<ext>' herunter."
-    )
+def run_download_pipeline(
+    input_csv: Path,
+    output_dir: Path,
+    audio_format: str = "wav",
+    save_links: bool = False,
+    cookies_from_browser: str | None = None,
+) -> int:
+    try:
+        ensure_ytdlp_exists()
+    except FileNotFoundError as exc:
+        print(f"Fehler: {exc}", file=sys.stderr)
+        return 1
 
-    parser.add_argument(
-        "--input-csv",
-        dest="input_csv",
-        default=None,
-        help="Pfad zur Eingabe-CSV (Standard: song_namen.csv neben dem Script)"
-    )
-
-    parser.add_argument(
-        "output_dir",
-        nargs="?",
-        default="downloads",
-        help="Zielordner für die heruntergeladenen Audiodateien (Standard: downloads)"
-    )
-
-    parser.add_argument(
-        "--audio-format",
-        dest="audio_format",
-        default="wav",
-        choices=["wav", "mp3", "m4a", "flac", "opus", "vorbis"],
-        help="Zielformat für Audio (Standard: wav)"
-    )
-
-    parser.add_argument(
-        "--save-links",
-        action="store_true",
-        help="Speichert zusätzlich eine links.txt im Zielordner"
-    )
-
-    parser.add_argument(
-        "--cookies-from-browser",
-        dest="cookies_from_browser",
-        default=None,
-        help="Browser für yt-dlp-Cookies, z. B. chrome, firefox, brave, edge"
-    )
-
-    return parser.parse_args()
-
-
-def main():
-    ensure_ytdlp_exists()
-    args = parse_args()
-
-    script_dir = Path(__file__).resolve().parent
-    input_csv = Path(args.input_csv).resolve() if args.input_csv else (script_dir / "song_namen.csv")
-    target_root = Path(args.output_dir).resolve()
+    input_csv = input_csv.resolve()
+    output_dir = output_dir.resolve()
 
     if not input_csv.exists() or not input_csv.is_file():
         print(f"Fehler: Eingabe-CSV nicht gefunden: {input_csv}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
-    target_root.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Eingabe-CSV: {input_csv}")
-    print(f"Zielordner: {target_root}")
+    print(f"Zielordner: {output_dir}")
 
-    links_txt = target_root / "links.txt" if args.save_links else None
+    links_txt = output_dir / "links.txt" if save_links else None
 
     print("\n" + "=" * 80)
     print(f"Verarbeite CSV: {input_csv.name}")
-    print(f"Ausgabeordner: {target_root}")
+    print(f"Ausgabeordner: {output_dir}")
     print("=" * 80)
 
     process_csv(
         input_csv=input_csv,
-        output_dir=target_root,
+        output_dir=output_dir,
         links_txt=links_txt,
-        audio_format=args.audio_format,
-        cookies_from_browser=args.cookies_from_browser,
+        audio_format=audio_format,
+        cookies_from_browser=cookies_from_browser,
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    print("Bitte run_pipeline.py verwenden.", file=sys.stderr)
+    raise SystemExit(1)
