@@ -1,10 +1,35 @@
 import csv
+import logging
 import subprocess
 import sys
 import shutil
 import re
 import time
 from pathlib import Path
+
+
+LOGGER_NAME = "spotify_to_wav.list_dl_yt"
+logger = logging.getLogger(LOGGER_NAME)
+
+
+def configure_logging() -> None:
+    if logger.handlers:
+        return
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+
+def format_duration(seconds: float) -> str:
+    return f"{seconds:.2f}s"
 
 
 def ensure_ytdlp_exists() -> None:
@@ -70,7 +95,7 @@ def search_youtube_first_result(query: str, cookies_from_browser: str | None = N
     cmd = [
         "yt-dlp",
         "--remote-components", "ejs:github",
-        f"ytsearch3:{query}",
+        f"ytsearch1:{query}",
         "--print", "webpage_url",
         "--skip-download",
         "--no-warnings",
@@ -84,7 +109,7 @@ def search_youtube_first_result(query: str, cookies_from_browser: str | None = N
 
     if not ok:
         if stderr.strip():
-            print(f"    [Search-Fehler] {stderr.strip()}", file=sys.stderr)
+            logger.error("[Search-Fehler] %s", stderr.strip())
         return None
 
     urls = [line.strip() for line in stdout.splitlines() if line.strip()]
@@ -121,9 +146,11 @@ def download_audio(
     ok, stdout, stderr = run_cmd(cmd)
 
     if stdout.strip():
-        print(stdout.strip())
+        for line in stdout.splitlines():
+            logger.info("[yt-dlp] %s", line)
     if stderr.strip():
-        print(stderr.strip(), file=sys.stderr)
+        for line in stderr.splitlines():
+            logger.warning("[yt-dlp] %s", line)
 
     return ok
 
@@ -136,10 +163,20 @@ def process_csv(
     cookies_from_browser: str | None = None,
 ) -> None:
     if not input_csv.exists():
-        print(f"Fehler: Datei nicht gefunden: {input_csv}", file=sys.stderr)
+        logger.error("Fehler: Datei nicht gefunden: %s", input_csv)
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    total_start = time.perf_counter()
+
+    # Cache vermeidet doppelte Suchanfragen (schneller, aber nicht aggressiver).
+    search_cache: dict[str, str | None] = {}
+    rows_processed = 0
+    rows_empty = 0
+    songs_downloaded = 0
+    songs_failed = 0
+    songs_no_match = 0
+    songs_existing = 0
 
     with input_csv.open("r", encoding="utf-8-sig", newline="") as csvfile:
         reader = csv.DictReader(csvfile)
@@ -147,10 +184,10 @@ def process_csv(
         required_columns = {"Artist", "Song", "Album"}
         missing = required_columns - set(reader.fieldnames or [])
         if missing:
-            print(
-                f"Fehler in {input_csv.name}: CSV braucht diese Spalten: Artist,Song,Album. "
-                f"Fehlend: {', '.join(sorted(missing))}",
-                file=sys.stderr
+            logger.error(
+                "Fehler in %s: CSV braucht diese Spalten: Artist,Song,Album. Fehlend: %s",
+                input_csv.name,
+                ", ".join(sorted(missing)),
             )
             return
 
@@ -160,64 +197,132 @@ def process_csv(
                 link_file_handle = links_txt.open("w", encoding="utf-8")
 
             for row_num, row in enumerate(reader, start=2):
+                row_start = time.perf_counter()
+                row_status = "UNBEKANNT"
                 artist = (row.get("Artist") or "").strip()
                 title = (row.get("Song") or "").strip()
                 album = (row.get("Album") or "").strip()
+                song_label = " - ".join(part for part in [artist, title] if part).strip() or "(leer)"
 
                 if not artist and not title and not album:
-                    print(f"{input_csv.name} | Zeile {row_num}: leer, übersprungen")
+                    row_status = "LEER_UEBERSPRUNGEN"
+                    rows_empty += 1
+                    logger.info("%s | Zeile %s: leer, übersprungen", input_csv.name, row_num)
                     if link_file_handle:
                         link_file_handle.write("KEIN_TREFFER\n")
-                    continue
-
-                queries = build_queries(artist, title, album)
-                url = None
-
-                for query in queries:
-                    print(f"\n{input_csv.name} | Zeile {row_num}: Suche nach: {query}")
-                    url = search_youtube_first_result(query, cookies_from_browser=cookies_from_browser)
-                    if url:
-                        break
-                    time.sleep(1)
-
-                if not url:
-                    print("  -> kein Treffer")
-                    if link_file_handle:
-                        link_file_handle.write("KEIN_TREFFER\n")
-                    continue
-
-                print(f"  -> Treffer: {url}")
-                if link_file_handle:
-                    link_file_handle.write(url + "\n")
-
-                output_name_base = sanitize_filename(f"{artist} - {title}")
-                final_ext = expected_ext(audio_format)
-                target_file = output_dir / f"{output_name_base}.{final_ext}"
-
-                if target_file.exists():
-                    print(f"  -> Datei existiert bereits, übersprungen: {target_file.name}")
-                    time.sleep(1)
-                    continue
-
-                print("  -> Download startet ...")
-                success = download_audio(
-                    url,
-                    output_dir,
-                    output_name_base=output_name_base,
-                    audio_format=audio_format,
-                    cookies_from_browser=cookies_from_browser,
-                )
-
-                if success:
-                    print(f"  -> Download erfolgreich: {target_file.name}")
                 else:
-                    print("  -> Fehler beim Download")
+                    queries = build_queries(artist, title, album)
+                    output_name_base = sanitize_filename(f"{artist} - {title}")
+                    final_ext = expected_ext(audio_format)
+                    target_file = output_dir / f"{output_name_base}.{final_ext}"
 
-                time.sleep(3)
+                    if target_file.exists():
+                        row_status = "DATEI_BEREITS_VORHANDEN"
+                        songs_existing += 1
+                        logger.info(
+                            "%s | Zeile %s: Datei existiert bereits, übersprungen: %s",
+                            input_csv.name,
+                            row_num,
+                            target_file.name,
+                        )
+                        if link_file_handle:
+                            link_file_handle.write("DATEI_BEREITS_VORHANDEN\n")
+                    else:
+                        url = None
+
+                        for query in queries:
+                            if query in search_cache:
+                                url = search_cache[query]
+                                if url:
+                                    logger.info(
+                                        "%s | Zeile %s: Cache-Treffer für: %s",
+                                        input_csv.name,
+                                        row_num,
+                                        query,
+                                    )
+                                else:
+                                    logger.info(
+                                        "%s | Zeile %s: Cache (kein Treffer) für: %s",
+                                        input_csv.name,
+                                        row_num,
+                                        query,
+                                    )
+                            else:
+                                logger.info("%s | Zeile %s: Suche nach: %s", input_csv.name, row_num, query)
+                                url = search_youtube_first_result(query, cookies_from_browser=cookies_from_browser)
+                                search_cache[query] = url
+                                if not url:
+                                    time.sleep(1)
+
+                            if url:
+                                break
+
+                        if not url:
+                            row_status = "KEIN_TREFFER"
+                            songs_no_match += 1
+                            logger.info("%s | Zeile %s: kein Treffer", input_csv.name, row_num)
+                            if link_file_handle:
+                                link_file_handle.write("KEIN_TREFFER\n")
+                        else:
+                            logger.info("%s | Zeile %s: Treffer: %s", input_csv.name, row_num, url)
+                            if link_file_handle:
+                                link_file_handle.write(url + "\n")
+
+                            logger.info("%s | Zeile %s: Download startet ...", input_csv.name, row_num)
+                            success = download_audio(
+                                url,
+                                output_dir,
+                                output_name_base=output_name_base,
+                                audio_format=audio_format,
+                                cookies_from_browser=cookies_from_browser,
+                            )
+
+                            if success:
+                                row_status = "DOWNLOAD_OK"
+                                songs_downloaded += 1
+                                logger.info(
+                                    "%s | Zeile %s: Download erfolgreich: %s",
+                                    input_csv.name,
+                                    row_num,
+                                    target_file.name,
+                                )
+                            else:
+                                row_status = "DOWNLOAD_FEHLER"
+                                songs_failed += 1
+                                logger.warning("%s | Zeile %s: Fehler beim Download", input_csv.name, row_num)
+
+                            # Kurze Pause zwischen Downloads als Botting-Schutz.
+                            time.sleep(2)
+
+                row_duration = time.perf_counter() - row_start
+                rows_processed += 1
+                logger.info(
+                    "%s | Zeile %s | Song: %s | Status: %s | Bearbeitungszeit: %s",
+                    input_csv.name,
+                    row_num,
+                    song_label,
+                    row_status,
+                    format_duration(row_duration),
+                )
 
         finally:
             if link_file_handle:
                 link_file_handle.close()
+
+    total_duration = time.perf_counter() - total_start
+    logger.info("=" * 80)
+    logger.info(
+        "Zusammenfassung %s | Zeilen: %s | Downloads OK: %s | Bereits vorhanden: %s | Kein Treffer: %s | Download-Fehler: %s | Leer: %s",
+        input_csv.name,
+        rows_processed,
+        songs_downloaded,
+        songs_existing,
+        songs_no_match,
+        songs_failed,
+        rows_empty,
+    )
+    logger.info("Gesamtzeit Song-Verarbeitung: %s", format_duration(total_duration))
+    logger.info("=" * 80)
 
 
 def run_download_pipeline(
@@ -227,30 +332,31 @@ def run_download_pipeline(
     save_links: bool = False,
     cookies_from_browser: str | None = None,
 ) -> int:
+    configure_logging()
     try:
         ensure_ytdlp_exists()
     except FileNotFoundError as exc:
-        print(f"Fehler: {exc}", file=sys.stderr)
+        logger.error("Fehler: %s", exc)
         return 1
 
     input_csv = input_csv.resolve()
     output_dir = output_dir.resolve()
 
     if not input_csv.exists() or not input_csv.is_file():
-        print(f"Fehler: Eingabe-CSV nicht gefunden: {input_csv}", file=sys.stderr)
+        logger.error("Fehler: Eingabe-CSV nicht gefunden: %s", input_csv)
         return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Eingabe-CSV: {input_csv}")
-    print(f"Zielordner: {output_dir}")
+    logger.info("Eingabe-CSV: %s", input_csv)
+    logger.info("Zielordner: %s", output_dir)
 
     links_txt = output_dir / "links.txt" if save_links else None
 
-    print("\n" + "=" * 80)
-    print(f"Verarbeite CSV: {input_csv.name}")
-    print(f"Ausgabeordner: {output_dir}")
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("Verarbeite CSV: %s", input_csv.name)
+    logger.info("Ausgabeordner: %s", output_dir)
+    logger.info("=" * 80)
 
     process_csv(
         input_csv=input_csv,
@@ -263,5 +369,6 @@ def run_download_pipeline(
 
 
 if __name__ == "__main__":
-    print("Bitte run_pipeline.py verwenden.", file=sys.stderr)
+    configure_logging()
+    logger.error("Bitte run_pipeline.py verwenden.")
     raise SystemExit(1)

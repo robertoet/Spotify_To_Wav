@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+import time
 from pathlib import Path
 
 from src import csv_clean_and_concat
@@ -11,20 +13,42 @@ from src import list_dl_yt
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+LOGGER_NAME = "spotify_to_wav.run_pipeline"
+logger = logging.getLogger(LOGGER_NAME)
+
+
+def configure_logging() -> None:
+    if logger.handlers:
+        return
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+
+def format_duration(seconds: float) -> str:
+    return f"{seconds:.2f}s"
 
 
 def run_csv_step(input_dir: Path, output_csv: Path) -> int:
-    print(f"Roh-CSV-Ordner: {input_dir}")
-    print(f"Erzeuge: {output_csv}")
+    logger.info("Roh-CSV-Ordner: %s", input_dir)
+    logger.info("Erzeuge: %s", output_csv)
 
     try:
         rows = csv_clean_and_concat.collect_rows(input_dir)
         csv_clean_and_concat.write_rows(rows, output_csv)
     except (FileNotFoundError, ValueError) as exc:
-        print(f"Fehler beim CSV-Schritt: {exc}", file=sys.stderr)
+        logger.error("Fehler beim CSV-Schritt: %s", exc)
         return 1
 
-    print(f"{len(rows)} Zeilen gespeichert in '{output_csv}'.")
+    logger.info("%s Zeilen gespeichert in '%s'.", len(rows), output_csv)
     return 0
 
 
@@ -69,6 +93,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_logging()
+    pipeline_start = time.perf_counter()
     args = parse_args()
     input_dir = Path(args.input_dir).resolve()
     input_csv = PROJECT_ROOT / "song_namen.csv"
@@ -76,7 +102,7 @@ def main() -> int:
 
     result = run_csv_step(input_dir=input_dir, output_csv=input_csv)
     if result != 0:
-        print(f"Pipeline fehlgeschlagen (Exit-Code {result}).", file=sys.stderr)
+        logger.error("Pipeline fehlgeschlagen (Exit-Code %s).", result)
         return result
 
     result = list_dl_yt.run_download_pipeline(
@@ -87,10 +113,12 @@ def main() -> int:
         cookies_from_browser=args.cookies_from_browser,
     )
     if result != 0:
-        print(f"Pipeline fehlgeschlagen (Exit-Code {result}).", file=sys.stderr)
+        logger.error("Pipeline fehlgeschlagen (Exit-Code %s).", result)
         return result
 
-    print("Pipeline abgeschlossen.")
+    total_duration = time.perf_counter() - pipeline_start
+    logger.info("Pipeline abgeschlossen.")
+    logger.info("Gesamtzeit Pipeline: %s", format_duration(total_duration))
     return 0
 
 
