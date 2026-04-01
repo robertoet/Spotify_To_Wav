@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
         help="Pfad zum Ordner mit den Roh-CSV-Dateien (Standard: roh)",
     )
     parser.add_argument(
-        "output_dir",
+        "--output-dir",
         nargs="?",
         default="downloads",
         help="Zielordner für die heruntergeladenen Audiodateien (Standard: downloads)",

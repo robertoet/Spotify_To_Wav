@@ -1,5 +1,6 @@
 __pycache__/
+downloads/
+.venv/
+
 *.pyc
 *.csv
-*.wav
-.venv/
