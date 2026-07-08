@@ -29,7 +29,7 @@ pip install -r requirements.txt
 ### CSV verarbeiten
 
 ```bash
-python csv_clean_and_concat.py
+python src/csv_clean_and_concat.py
 ```
 
 ### Komplette Pipeline
@@ -41,11 +41,48 @@ python run_pipeline.py
 Optional mit den bisherigen Download-Argumenten:
 
 ```bash
-python run_pipeline.py [output_dir] \
+python run_pipeline.py downloads \
   --input-dir /pfad/zu/roh_csvs \
   --audio-format wav \
   --save-links \
   --cookies-from-browser chrome
+```
+
+Alternativ kann der Zielordner auch explizit gesetzt werden:
+
+```bash
+python run_pipeline.py --output-dir downloads
+```
+
+### Altersbeschränkte YouTube-Treffer
+
+Die Pipeline sucht pro Song mehrere YouTube-Treffer. Wenn ein Treffer
+altersbeschränkt ist, wird er übersprungen und der nächste Treffer versucht.
+Falls alle passenden Treffer eine Anmeldung brauchen, die Pipeline mit
+Browser-Cookies starten:
+
+```bash
+python run_pipeline.py /Volumes/SanDiskData/rgb --cookies-from-browser chrome
+```
+
+Warnungen werden im Terminal hellblau und Fehler rot ausgegeben. Das kann mit
+der Umgebungsvariable `NO_COLOR=1` deaktiviert werden.
+
+### SSL-Zertifikatsfehler bei yt-dlp
+
+Wenn `yt-dlp` mit `CERTIFICATE_VERIFY_FAILED` abbricht, zuerst die
+Abhängigkeiten in der aktiven virtuellen Umgebung aktualisieren:
+
+```bash
+pip install -r requirements.txt
+```
+
+Die Pipeline nutzt dann automatisch das CA-Bundle aus `certifi`.
+Falls der lokale Zertifikatsspeicher trotzdem defekt ist, kann als Notfalllösung
+die Zertifikatsprüfung von `yt-dlp` deaktiviert werden:
+
+```bash
+python run_pipeline.py /Volumes/SanDiskData/rgb --no-check-certificates
 ```
 
 ## Haftungsausschluss (Disclaimer)

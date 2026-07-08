@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src import csv_clean_and_concat
 from src import list_dl_yt
+from src.logging_utils import configure_logger
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -18,19 +19,7 @@ logger = logging.getLogger(LOGGER_NAME)
 
 
 def configure_logging() -> None:
-    if logger.handlers:
-        return
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s | %(levelname)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-    )
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
+    configure_logger(logger, stream=sys.stdout)
 
 
 def format_duration(seconds: float) -> str:
@@ -60,6 +49,12 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
+        "output_dir",
+        nargs="?",
+        default=None,
+        help="Zielordner für die heruntergeladenen Audiodateien (Standard: downloads)",
+    )
+    parser.add_argument(
         "--input-dir",
         dest="input_dir",
         default="roh",
@@ -67,8 +62,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        nargs="?",
-        default="downloads",
+        dest="output_dir_option",
+        metavar="OUTPUT_DIR",
+        default=None,
         help="Zielordner für die heruntergeladenen Audiodateien (Standard: downloads)",
     )
     parser.add_argument(
@@ -89,7 +85,20 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Browser für yt-dlp-Cookies, z. B. chrome, firefox, brave, edge",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--no-check-certificates",
+        action="store_true",
+        help=(
+            "Gibt yt-dlp --no-check-certificates weiter. "
+            "Nur verwenden, wenn lokale SSL-Zertifikate fehlschlagen."
+        ),
+    )
+    args = parser.parse_args()
+    if args.output_dir and args.output_dir_option:
+        parser.error("Bitte entweder output_dir oder --output-dir verwenden, nicht beides.")
+
+    args.output_dir = args.output_dir_option or args.output_dir or "downloads"
+    return args
 
 
 def main() -> int:
@@ -111,6 +120,7 @@ def main() -> int:
         audio_format=args.audio_format,
         save_links=args.save_links,
         cookies_from_browser=args.cookies_from_browser,
+        no_check_certificates=args.no_check_certificates,
     )
     if result != 0:
         logger.error("Pipeline fehlgeschlagen (Exit-Code %s).", result)
